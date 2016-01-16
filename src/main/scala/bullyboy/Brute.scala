@@ -84,7 +84,7 @@ trait StdoutProgress extends Progress with Utils {
             prevtime = curtime
             prevcount = count
             val remaintime = (alphabet.combs(passwordSize) - count) * duration / justdonecount / 1000 / 3600
-            val rate =justdonecount*1000L/duration
+            val rate = justdonecount * 1000L / duration
             println(s"$count total tested, +$justdonecount added in $duration ms - $rate/s - $remaintime hours remaining")
           }
         }
@@ -93,14 +93,45 @@ trait StdoutProgress extends Progress with Utils {
   }
 }
 
+trait PasswordGenerator {
+  val alphabet: Alphabet
+  def passwordGenerator(passlen: Int): Iterator[Pass] = {
+    var tmp = Array.fill(passlen)(0)
+    def inc(): Boolean = {
+      def incworker(pos: Int): Boolean = {
+        if (pos == passlen) false else {
+          if (tmp(pos) < alphabet.size - 1) {
+            tmp(pos) = tmp(pos) + 1
+            true
+          } else {
+            tmp(pos) = 0
+            incworker(pos + 1)
+          }
+        }
+      }
+      incworker(0)
+    }
+    new Iterator[Pass] {
+      private var status: Boolean = true
+      def hasNext: Boolean = status
+      def next(): Pass = {
+        val newone = tmp.map(i => alphabet(i))
+        status = inc()
+        newone
+      }
+    }
+  }
+
+}
+
 trait Brutalizer extends Progress {
   val codec = "US-ASCII"
   val alphabet: Alphabet
+  val passwordSize:Int
   def makehash(password: Pass): Hash
 
-  def testpassword(password2test: Pass, refhash: Hash) = {
-    progressMade(alphabet, password2test.size)
-    val hash2test = makehash(password2test)
+  def testhash(hash2test: Pass, refhash: Hash) = {
+    progressMade(alphabet, passwordSize)
     if (hash2test.size != refhash.size) false
     else {
       var i = hash2test.size - 1
@@ -108,10 +139,15 @@ trait Brutalizer extends Progress {
       i < 0
     }
   }
+
+  def testpassword(password2test: Pass, refhash: Hash) = {
+    val hash2test = makehash(password2test)
+    testhash(hash2test,refhash)
+  }
 }
 
-abstract class ClassicBrutalizer(val alphabet: Alphabet) extends Brutalizer {
-  def brutalize(inhash: Hash, passwordSize: Int, alphabet: Alphabet): Option[String] = {
+abstract class ClassicBrutalizer(val alphabet: Alphabet, val passwordSize: Int) extends Brutalizer {
+  def brutalize(inhash: Hash): Option[String] = {
     val curpass = Array.fill(passwordSize)(alphabet.head)
     def worker(pos: Int): Option[String] = {
       if (pos == passwordSize) {
@@ -133,69 +169,50 @@ abstract class ClassicBrutalizer(val alphabet: Alphabet) extends Brutalizer {
   }
 }
 
-abstract class ParallelBrutalizer(val alphabet: Alphabet) extends Brutalizer {
-//  def passwordGenerator(passlen: Int): Stream[Pass] = {
-//    var tmp = Array.fill(passlen)(0)
-//    def inc(): Boolean = {
-//      def incworker(pos: Int): Boolean = {
-//        if (pos == passlen) false else {
-//          if (tmp(pos) < alphabet.size - 1) {
-//            tmp(pos) = tmp(pos) + 1
-//            true
-//          } else {
-//            tmp(pos) = 0
-//            incworker(pos + 1)
-//          }
-//        }
-//      }
-//      incworker(0)
-//    }
-//    def next(): Stream[Array[Byte]] = {
-//      val na = tmp.map(i => alphabet(i))
-//      if (inc) na #:: next() else na #:: Stream.empty
-//    }
-//    next()
-//  }
-//  def brutalize(inhash: Hash, passwordSize: Int, alphabet: Alphabet): Option[String] = {
-//    passwordGenerator(passwordSize)
-//      .find(password => testpassword(password, inhash))
-//      .map(a => new String(a, codec))
-//  }
+abstract class ParallelBrutalizer(val alphabet: Alphabet, val passwordSize: Int) extends Brutalizer with PasswordGenerator {
 
-  def passwordGenerator(passlen: Int): Iterator[Pass] = {
-    var tmp = Array.fill(passlen)(0)
-    def inc(): Boolean = {
-      def incworker(pos: Int): Boolean = {
-        if (pos == passlen) false else {
-          if (tmp(pos) < alphabet.size - 1) {
-            tmp(pos) = tmp(pos) + 1
-            true
-          } else {
-            tmp(pos) = 0
-            incworker(pos + 1)
-          }
-        }
-      }
-      incworker(0)
-    }
-    new Iterator[Pass] {
-      private var status:Boolean=true
-      def hasNext:Boolean = status
-      def next():Pass = {
-        val newone = tmp.map(i => alphabet(i))
-        status=inc()
-        newone
-      }
-    }
-  }
-
-  def brutalize(inhash: Hash, passwordSize: Int, alphabet: Alphabet): Option[String] = {
+  def brutalize(inhash: Hash): Option[String] = {
     passwordGenerator(passwordSize)
       .grouped(1000)
       .map(_.par.find(password => testpassword(password, inhash)).map(b => new String(b)))
       .toStream
       .filter(_.isDefined)
       .head
+  }
+}
+
+abstract class StreamedBrutalizer(val alphabet: Alphabet, val passwordSize: Int) extends Brutalizer with PasswordGenerator {
+  import scala.concurrent.ExecutionContext.Implicits.global
+  import akka.actor.{ ActorSystem, Actor, Props }
+  import akka.stream.{ActorMaterializer}
+  import akka.stream.scaladsl._
+  import akka.stream._
+  import scala.concurrent.{Future,Await}
+  import scala.concurrent.duration._
+  
+  implicit val system = ActorSystem("reactive-tweets")
+  implicit val materializer = ActorMaterializer()
+
+  def brutalize(inhash: Hash): Option[String] = {
+    val passwords:Source[Pass,Unit] = Source.fromIterator(() =>passwordGenerator(passwordSize))
+    //val out = Sink.headOption[Option[String]]
+    val out = Sink.foreach[Option[String]](println)
+    
+    val passflow = RunnableGraph.fromGraph(GraphDSL.create() { implicit builder =>
+      
+      val finder = Flow[Pass].mapAsyncUnordered(256)(x => Future{if (testpassword(x,inhash)) Some(x) else None })
+      val cleanup = Flow[Option[Pass]].filter(_.isDefined)
+      val tostr = Flow[Option[Pass]].map(_.map(new String(_)))
+      import GraphDSL.Implicits._
+      
+      passwords ~> finder ~> cleanup ~> tostr ~> out 
+      
+      ClosedShape
+    })
+    
+    passflow.run()
+    
+    None
   }
 }
 
@@ -206,12 +223,13 @@ object Brute extends Utils {
     val alphabet = Alphabet(('0' to '9') ++ ('a' to 'z') ++ ('A' to 'Z'))
     alphabet.info(passlen)
 
-    val brutalizer = new ClassicBrutalizer(alphabet) with Sha1Native with StdoutProgress
-    //val brutalizer = new ParallelBrutalizer(alphabet) with Sha1Apache with StdoutProgress
-    
+    //val brutalizer = new ClassicBrutalizer(alphabet, passlen) with Sha1Native with StdoutProgress
+    //val brutalizer = new ParallelBrutalizer(alphabet,passlen) with Sha1Apache with StdoutProgress
+    val brutalizer = new StreamedBrutalizer(alphabet,passlen) with Sha1Apache with StdoutProgress
+
     val inhash = brutalizer.makehash("trucMuc1".getBytes(brutalizer.codec))
     println("bruteforcing sha1=" + toHex(inhash))
 
-    brutalizer.brutalize(inhash, passlen, alphabet)
+    brutalizer.brutalize(inhash)
   }
 }
