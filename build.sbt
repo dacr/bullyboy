@@ -13,7 +13,8 @@ jarName in assembly := "bullyboy.jar"
 libraryDependencies ++= Seq(
    "commons-codec" % "commons-codec" % "1.10",
    "de.tynne" % "saphir-hash-jca" % "3.0.1",
-   "com.typesafe.akka" %% "akka-actor" % "2.4.1"  
+   //"com.typesafe.akka" %% "akka-actor" % "2.4.1"  
+    "com.typesafe.akka" %% "akka-stream-experimental" % "2.0.2"
 )
 
 libraryDependencies += "org.scalatest" %% "scalatest" % "2.2.6" % "test"

@@ -25,8 +25,14 @@ import org.scalatest.junit.JUnitRunner
 class BruteTest extends FunSuite with ShouldMatchers {
   
   test("Simple test") {
-    Brute.message should startWith("Hello")
     info("Test done")
   }
   
+  
+  test("parallel brutalizer password generator") {
+    val alphabet = Alphabet(Seq('A', 'B'))
+    val brut = new ParallelBrutalizer(alphabet) with Sha1Native
+    brut.passwordGenerator(1).toList should have size(2)
+    brut.passwordGenerator(2).toList should have size(4)
+  }
 }
