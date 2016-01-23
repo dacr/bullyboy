@@ -13,12 +13,16 @@ jarName in assembly := "bullyboy.jar"
 libraryDependencies ++= Seq(
    "commons-codec" % "commons-codec" % "1.10",
    "de.tynne" % "saphir-hash-jca" % "3.0.1",
-   //"com.typesafe.akka" %% "akka-actor" % "2.4.1"  
-    "com.typesafe.akka" %% "akka-stream-experimental" % "2.0.2"
+   "com.typesafe.akka" %% "akka-stream-experimental" % "2.0.2",
+   "com.timgroup" %% "iterata" % "0.1.6",
+   "io.github.andrebeat" %% "scala-pool" % "0.3.0-SNAPSHOT"
 )
 
 libraryDependencies += "org.scalatest" %% "scalatest" % "2.2.6" % "test"
 libraryDependencies += "junit" % "junit" % "4.12" % "test"
+
+resolvers += Resolver.sonatypeRepo("snapshots")
+
 
 initialCommands in console := """
   import bullyboy._

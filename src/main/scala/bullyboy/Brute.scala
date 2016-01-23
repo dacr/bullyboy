@@ -17,13 +17,54 @@
 package bullyboy
 
 trait Sha1 {
-  def makehash(pass: Array[Byte]): Array[Byte]
+  def makehash(pass: Pass): Pass
+  def makehash(passlist: Iterable[Pass]):Iterable[Hash] = passlist.map(makehash)
 }
 
 trait Sha1Native extends Sha1 {
+  // default digester is not thread safe
   import java.security.MessageDigest
   private val md = MessageDigest.getInstance("SHA-1")
   def makehash(pass: Pass): Hash = md.digest(pass)
+}
+
+trait Sha1NativeThreadLocal extends Sha1 {
+  // default digester is not thread safe
+  import java.security.MessageDigest
+  private val threadLocal = new ThreadLocal[MessageDigest]()
+  def makehash(pass: Pass): Hash = {
+    val md = threadLocal.get() match {
+      case null =>
+        val md=MessageDigest.getInstance("SHA-1")
+        threadLocal.set(md)
+        md
+      case md => md
+    }
+    md.digest(pass)
+  }
+  
+  override def makehash(passlist: Iterable[Pass]):Iterable[Pass] = {
+    val md = threadLocal.get() match {
+      case null =>
+        val md=MessageDigest.getInstance("SHA-1")
+        threadLocal.set(md)
+        md
+      case md => md
+    }
+    passlist.map(md.digest)
+  }
+}
+
+trait Sha1NativePooled extends Sha1 {
+  // default digester is not thread safe, so using pooling
+  import java.security.MessageDigest
+  import io.github.andrebeat.pool._
+  private def md() = MessageDigest.getInstance("SHA-1")
+  private val pool= Pool[MessageDigest](16, md)
+  def makehash(pass: Pass): Hash = pool.acquire.use(md => md.digest(pass))
+  override def makehash(passlist: Iterable[Pass]):Iterable[Pass] = {
+    pool.acquire.use(md => passlist.map(md.digest))
+  }
 }
 
 trait Sha1Apache extends Sha1 {
@@ -31,12 +72,28 @@ trait Sha1Apache extends Sha1 {
   def makehash(pass: Pass): Hash = DigestUtils.sha1(pass)
 }
 
-trait Sha1SaphirLib extends Sha1 {
+trait Sha1Saphir extends Sha1 {
+  // saphir digester is not thread safe
   import java.security.MessageDigest
   import fr.cryptohash.JCAProvider
   private val md = MessageDigest.getInstance("SHA-1", new JCAProvider)
   def makehash(pass: Pass): Hash = md.digest(pass)
 }
+
+trait Sha1SaphirPooled extends Sha1 {
+  // saphir digester is not thread safe, so using pooling
+  import java.security.MessageDigest
+  import fr.cryptohash.JCAProvider
+  import io.github.andrebeat.pool._
+  private def md() = MessageDigest.getInstance("SHA-1", new JCAProvider)
+  private val pool= Pool[MessageDigest](16, md)
+  def makehash(pass: Pass): Hash = pool.acquire.use(md => md.digest(pass))
+  override def makehash(passlist: Iterable[Pass]):Iterable[Pass] = {
+    pool.acquire.use(md => passlist.map(md.digest))
+  }
+}
+
+
 
 trait Utils {
   def toHex(bytes: Hash) = bytes.map { b => f"$b%02x" }.mkString
@@ -129,6 +186,7 @@ trait Brutalizer extends Progress {
   val alphabet: Alphabet
   val passwordSize:Int
   def makehash(password: Pass): Hash
+  def makehash(passlist: Iterable[Pass]):Iterable[Hash]
 
   def testhash(hash2test: Pass, refhash: Hash) = {
     progressMade(alphabet, passwordSize)
@@ -140,7 +198,7 @@ trait Brutalizer extends Progress {
     }
   }
 
-  def testpassword(password2test: Pass, refhash: Hash) = {
+  def testpassword(password2test: Pass, refhash: Hash):Boolean = {
     val hash2test = makehash(password2test)
     testhash(hash2test,refhash)
   }
@@ -170,16 +228,33 @@ abstract class ClassicBrutalizer(val alphabet: Alphabet, val passwordSize: Int) 
 }
 
 abstract class ParallelBrutalizer(val alphabet: Alphabet, val passwordSize: Int) extends Brutalizer with PasswordGenerator {
-
   def brutalize(inhash: Hash): Option[String] = {
     passwordGenerator(passwordSize)
-      .grouped(1000)
-      .map(_.par.find(password => testpassword(password, inhash)).map(b => new String(b)))
+      .grouped(100000)
+      .map(_.par.find(pass => testpassword(pass, inhash)).map(b => new String(b)))
       .toStream
       .filter(_.isDefined)
       .head
   }
 }
+
+abstract class ParallelIteraBrutalizer(val alphabet: Alphabet, val passwordSize: Int) extends Brutalizer with PasswordGenerator {
+  import com.timgroup.iterata.ParIterator.Implicits._
+  import scala.concurrent._
+  import java.util.concurrent._
+
+  //implicit val customExecutor = ExecutionContext.fromExecutorService(Executors.newFixedThreadPool(16))
+
+  def brutalize(inhash: Hash): Option[String] = {
+    val result = passwordGenerator(passwordSize)
+      .filter(p=> testpassword(p, inhash))
+      .map(p=>new String(p))
+      .par(100000)
+    if (result.hasNext) Some(result.next) else None
+  }
+}
+
+
 
 abstract class StreamedBrutalizer(val alphabet: Alphabet, val passwordSize: Int) extends Brutalizer with PasswordGenerator {
   import scala.concurrent.ExecutionContext.Implicits.global
@@ -224,8 +299,10 @@ object Brute extends Utils {
     alphabet.info(passlen)
 
     //val brutalizer = new ClassicBrutalizer(alphabet, passlen) with Sha1Native with StdoutProgress
-    //val brutalizer = new ParallelBrutalizer(alphabet,passlen) with Sha1Apache with StdoutProgress
-    val brutalizer = new StreamedBrutalizer(alphabet,passlen) with Sha1Apache with StdoutProgress
+    //val brutalizer = new ClassicBrutalizer(alphabet, passlen) with Sha1Apache with StdoutProgress
+    //val brutalizer = new ParallelBrutalizer(alphabet,passlen) with Sha1NativePooled with StdoutProgress
+    val brutalizer = new ParallelIteraBrutalizer(alphabet,passlen) with Sha1NativePooled with StdoutProgress
+    //val brutalizer = new StreamedBrutalizer(alphabet,passlen) with Sha1NativeThreadLocal with StdoutProgress
 
     val inhash = brutalizer.makehash("trucMuc1".getBytes(brutalizer.codec))
     println("bruteforcing sha1=" + toHex(inhash))
