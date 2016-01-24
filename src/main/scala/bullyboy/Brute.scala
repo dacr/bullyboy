@@ -18,16 +18,25 @@ package bullyboy
 
 import scala.concurrent.ExecutionContextExecutor
 
-trait Sha1 {
+trait Descriptor {
+  val name:String
+  val desc:String
+}
+
+trait Sha1 extends Descriptor {
   def makehash(pass: Pass): Pass
   def hashit(pass: Pass): Tuple2[Pass, Hash] = pass -> makehash(pass)
 }
 
 class Sha1Nop extends Sha1 {
+  val name = "Sha1Nop"
+  val desc = "Do nothing, pass it returns as the hash"
   def makehash(pass: Pass): Hash = pass
 }
 
 class Sha1Native() extends Sha1 {
+  val name = "Sha1Native"
+  val desc = "Default JVM Sha1 implementation - not thread safe"
   // default digester is not thread safe
   import java.security.MessageDigest
   private val md = MessageDigest.getInstance("SHA-1")
@@ -35,6 +44,8 @@ class Sha1Native() extends Sha1 {
 }
 
 class Sha1NativeThreadLocal() extends Sha1 {
+  val name = "Sha1NativeThreadLocal"
+  val desc = "Default JVM Sha1 implementation - thread safety through ThreadLocal variables"
   // default digester is not thread safe
   import java.security.MessageDigest
   private val threadLocal = new ThreadLocal[MessageDigest]()
@@ -51,6 +62,8 @@ class Sha1NativeThreadLocal() extends Sha1 {
 }
 
 class Sha1NativePooled() extends Sha1 {
+  val name = "Sha1NativePooled"
+  val desc = "Default JVM Sha1 implementation - thread safety through digester objects pool"
   // default digester is not thread safe, so using pooling
   import java.security.MessageDigest
   import io.github.andrebeat.pool._
@@ -60,11 +73,15 @@ class Sha1NativePooled() extends Sha1 {
 }
 
 class Sha1Apache() extends Sha1 {
+  val name = "Sha1Apache"
+  val desc = "Apache Sha1 implementation coming from commons-codec library"
   import org.apache.commons.codec.digest.DigestUtils
   def makehash(pass: Pass): Hash = DigestUtils.sha1(pass)
 }
 
 class Sha1Saphir() extends Sha1 {
+  val name = "Sha1Saphir"
+  val desc = "Saphir Sha1 implementation coming from saphir-hash-jca library - not thread safe"
   // saphir digester is not thread safe
   import java.security.MessageDigest
   import fr.cryptohash.JCAProvider
@@ -73,6 +90,8 @@ class Sha1Saphir() extends Sha1 {
 }
 
 class Sha1SaphirPooled() extends Sha1 {
+  val name = "Sha1SaphirPooled"
+  val desc = "Saphir Sha1 implementation coming from saphir-hash-jca library - thread safety through digester objects pool"
   // saphir digester is not thread safe, so using pooling
   import java.security.MessageDigest
   import fr.cryptohash.JCAProvider
@@ -103,11 +122,14 @@ object Alphabet {
   }
 }
 
-trait Progress {
+trait Progress extends Descriptor {
   def progressMade(context: GoalContext)
 }
 
 class StdoutProgress extends Progress with Utils {
+  val name = "StdoutProgress"
+  val desc = "Basic progress followup which synchronization issue"
+
   val checkStep = 1000000L
   private var count = 0L
   private var prevtime = 0L
@@ -139,6 +161,8 @@ class StdoutProgress extends Progress with Utils {
 }
 
 class StdoutAtomicProgress() extends Progress with Utils {
+  val name = "StdoutAtomicProgress"
+  val desc = "Basic progress followup using JVM atomic operation"
   import java.util.concurrent.atomic._
 
   val checkStep = 1000000L
@@ -169,7 +193,9 @@ class StdoutAtomicProgress() extends Progress with Utils {
   }
 }
 
-class PasswordGenerator(context: GoalContext) {
+class PasswordGenerator(context: GoalContext) extends Descriptor {
+  val name = "PasswordGenerator"
+  val desc = "Iterator based password generator "
   def generator(): Iterator[Pass] = {
     var tmp = Array.fill(context.passwordSize)(0)
     def inc(): Boolean = {
@@ -212,7 +238,7 @@ case class GoalContext(
   def combs() = alphabet.combs(passwordSize)
 }
 
-trait Brutalizer {
+trait Brutalizer extends Descriptor {
   val codec = "US-ASCII"
   val context: GoalContext
   val impls: Implementations
@@ -236,6 +262,8 @@ trait Brutalizer {
 }
 
 class ClassicBrutalizer(val context: GoalContext, val impls: Implementations) extends Brutalizer {
+  val name = "ClassicBrutalizer"
+  val desc = "Default monothreaded brutalizer implementations with inline password generator"
   def brutalize(inhash: Hash): Option[String] = {
     val curpass = Array.fill(context.passwordSize)(context.alphabet.head)
     def worker(pos: Int): Option[String] = {
@@ -260,6 +288,8 @@ class ClassicBrutalizer(val context: GoalContext, val impls: Implementations) ex
 
 
 class ShorterClassicBrutalizer(val context: GoalContext, val impls: Implementations) extends Brutalizer {
+  val name = "ShorterClassicBrutalizer"
+  val desc = "Monothreaded brutalizer implementation, it uses the provided password generator"
   def brutalize(inhash: Hash): Option[String] = {
     impls.generator.generator().find(p => testpassword(p, inhash)).map(p=> new String(p))
   }
@@ -267,6 +297,8 @@ class ShorterClassicBrutalizer(val context: GoalContext, val impls: Implementati
 
 
 class ParallelBrutalizer(val context: GoalContext, val impls: Implementations) extends Brutalizer {
+  val name = "ParallelBrutalizer"
+  val desc = "Multithreaded brutalizer implementation"
   import scala.concurrent._
   import java.util.concurrent._
 
@@ -281,6 +313,9 @@ class ParallelBrutalizer(val context: GoalContext, val impls: Implementations) e
 }
 
 class ParallelIteraBrutalizer(val context: GoalContext, val impls: Implementations) extends Brutalizer {
+  val name = "ParallelIteraBrutalizer"
+  val desc = "Multithreaded brutalizer implementation - parallelization over iterator is provided by itera library"
+  
   import com.timgroup.iterata.ParIterator.Implicits._
 
   def brutalize(inhash: Hash): Option[String] = {
@@ -294,6 +329,8 @@ class ParallelIteraBrutalizer(val context: GoalContext, val impls: Implementatio
 }
 
 class StreamedBrutalizer(val context: GoalContext, val impls: Implementations) extends Brutalizer {
+  val name = "Streamed Brutalizer"
+  val desc = "Akka streamed based implementation"
   import akka.actor.{ ActorSystem, Actor, Props }
   import akka.stream.{ ActorMaterializer }
   import akka.stream.scaladsl._
@@ -332,7 +369,13 @@ case class Implementations(
   sha1: Sha1,
   generator: PasswordGenerator,
   progress: Progress,
-  executor: ExecutionContextExecutor)
+  executor: ExecutionContextExecutor) extends Descriptor {
+  val name = sha1.name+" - "+generator.name+" - "+progress.name+" - "
+  val desc = ""
+}
+  
+  
+  
 object Implementations {
   def defaultExecutor():ExecutionContextExecutor = {
     scala.concurrent.ExecutionContext.Implicits.global
@@ -372,7 +415,8 @@ object Brute extends Utils {
 
     val testpassword = "trucMuc1"
     val inhash = sha1.makehash(testpassword.getBytes(brutalizer.codec))
-    println("bruteforcing sha1=" + toHex(inhash))
+    println("Bruteforcing sha1=" + toHex(inhash))
+    println("Using "+brutalizer.name+" with "+impls.name)
 
     brutalizer.brutalize(inhash)
   }

@@ -19,6 +19,8 @@ are tested, as well as several ways to try using all available CPU.
   nop sha-1, 110 days for classic => 740 days for parallel
   + The issue was linked to the password generator that was not fast enough, and was not 
     used by the default classic implementation !
+- Sometimes it is required to restart several times "sbt run" to achieve better performances !
+  + Why ?
 
 ## Some interesting external links
 
