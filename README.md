@@ -29,6 +29,8 @@ are tested, as well as several ways to try using all available CPU.
   + But it looks like it doesn't achieve the same performance as for ThreadPoolTaskSupport
 - For implementations based on parallel collections, a good grouping size can help to achieve
   the best performances. 100000 brings better performances than 10000 or 500000  
+- 1.8.0_72 is almost two times faster than 1.7.0_80 ! => 650 days versus 1130 days !!
+  + Context : ParallelBrutalizer with Sha1NativeThreadLocal - PasswordGenerator - StdoutAtomicProgress 
 
 ## Some interesting external links
 
