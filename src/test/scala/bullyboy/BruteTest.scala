@@ -30,8 +30,12 @@ class BruteTest extends FunSuite with ShouldMatchers {
   
   
   test("Password generator") {
-    val brut = new PasswordGenerator{ val alphabet=Alphabet(Seq('A', 'B'))}
-    brut.passwordGenerator(1).toList should have size(2)
-    brut.passwordGenerator(2).toList should have size(4)
+    val alphabet=Alphabet(Seq('A', 'B'))
+    
+    val brut1 = new PasswordGenerator(GoalContext(1, alphabet))
+    brut1.generator().toList should have size(2)
+    
+    val brut2 = new PasswordGenerator(GoalContext(2, alphabet))
+    brut2.generator().toList should have size(4)
   }
 }
