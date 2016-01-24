@@ -21,6 +21,14 @@ are tested, as well as several ways to try using all available CPU.
     used by the default classic implementation !
 - Sometimes it is required to restart several times "sbt run" to achieve better performances !
   + Why ?
+- For parallel collections, ThreadPoolTaskSupport has been deprecated, but it has faster in
+  my case, than ForkJoinTaskSupport.
+  + But it can be replace hopefully by the following conversion :
+    `new ExecutionContextTaskSupport(ExecutionContext.fromExecutor(impls.executor))`
+  + Just use for example a FixedThreadPool for impls.executor..
+  + But it looks like it doesn't achieve the same performance as for ThreadPoolTaskSupport
+- For implementations based on parallel collections, a good grouping size can help to achieve
+  the best performances. 100000 brings better performances than 10000 or 500000  
 
 ## Some interesting external links
 

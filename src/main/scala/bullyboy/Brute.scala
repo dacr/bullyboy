@@ -243,8 +243,6 @@ trait Brutalizer extends Descriptor {
   val context: GoalContext
   val impls: Implementations
 
-  implicit lazy val executor = impls.executor
-
   def testhash(hash2test: Pass, refhash: Hash) = {
     impls.progress.progressMade(context)
     if (hash2test.size != refhash.size) false
@@ -299,13 +297,23 @@ class ShorterClassicBrutalizer(val context: GoalContext, val impls: Implementati
 class ParallelBrutalizer(val context: GoalContext, val impls: Implementations) extends Brutalizer {
   val name = "ParallelBrutalizer"
   val desc = "Multithreaded brutalizer implementation"
-  import scala.concurrent._
-  import java.util.concurrent._
 
+  import scala.collection.parallel._
+  import scala.concurrent._
+
+  //val tasksupport =  new ExecutionContextTaskSupport(ExecutionContext.fromExecutor(impls.executor))
+  val tasksupport =  new ThreadPoolTaskSupport()
+  
+  def parallelize(inhash: Hash)(seq:Seq[Pass]) = {
+    val pc = seq.par
+    pc.tasksupport = tasksupport
+    pc.map(impls.sha1.hashit).find { case (p, h) => testhash(h, inhash) }.map { case (p, h) => new String(p) }
+  }
+  
   def brutalize(inhash: Hash): Option[String] = {
     impls.generator.generator()
       .grouped(100000)
-      .map(_.par.map(impls.sha1.hashit).find { case (p, h) => testhash(h, inhash) }.map { case (p, h) => new String(p) })
+      .map(parallelize(inhash))
       .toStream
       .filter(_.isDefined)
       .head
@@ -318,6 +326,9 @@ class ParallelIteraBrutalizer(val context: GoalContext, val impls: Implementatio
   
   import com.timgroup.iterata.ParIterator.Implicits._
 
+  // TODO : How to setup a custom tasksupport with iterata library ?
+  
+  implicit lazy val executor = impls.executor
   def brutalize(inhash: Hash): Option[String] = {
     val result = impls.generator.generator()
       .par(100000)
@@ -338,6 +349,7 @@ class StreamedBrutalizer(val context: GoalContext, val impls: Implementations) e
   import scala.concurrent.{ Future, Await }
   import scala.concurrent.duration._
 
+  implicit lazy val executor = impls.executor
   implicit val system = ActorSystem("bully-boy")
   implicit val materializer = ActorMaterializer()
 
@@ -405,7 +417,7 @@ object Brute extends Utils {
     val sha1 = new Sha1NativeThreadLocal()
     val generator = new PasswordGenerator(context)
     val progress = new StdoutAtomicProgress()
-    val executor = Implementations.defaultExecutor() // fixedPoolExecutor()
+    val executor = Implementations.fixedPoolExecutor()
 
     val impls = new Implementations(sha1, generator, progress, executor)
 
