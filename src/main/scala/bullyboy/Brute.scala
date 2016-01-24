@@ -21,18 +21,18 @@ trait Sha1 {
   def hashit(pass:Pass):Tuple2[Pass,Hash]= pass -> makehash(pass)
 }
 
-trait Sha1Nop extends Sha1 {
+class Sha1Nop extends Sha1 {
   def makehash(pass: Pass): Hash = pass
 }
 
-trait Sha1Native extends Sha1 {
+class Sha1Native() extends Sha1 {
   // default digester is not thread safe
   import java.security.MessageDigest
   private val md = MessageDigest.getInstance("SHA-1")
   def makehash(pass: Pass): Hash = md.digest(pass)
 }
 
-trait Sha1NativeThreadLocal extends Sha1 {
+class Sha1NativeThreadLocal() extends Sha1 {
   // default digester is not thread safe
   import java.security.MessageDigest
   private val threadLocal = new ThreadLocal[MessageDigest]()
@@ -48,7 +48,7 @@ trait Sha1NativeThreadLocal extends Sha1 {
   }  
 }
 
-trait Sha1NativePooled extends Sha1 {
+class Sha1NativePooled() extends Sha1 {
   // default digester is not thread safe, so using pooling
   import java.security.MessageDigest
   import io.github.andrebeat.pool._
@@ -57,12 +57,12 @@ trait Sha1NativePooled extends Sha1 {
   def makehash(pass: Pass): Hash = pool.acquire.use(md => md.digest(pass))
 }
 
-trait Sha1Apache extends Sha1 {
+class Sha1Apache() extends Sha1 {
   import org.apache.commons.codec.digest.DigestUtils
   def makehash(pass: Pass): Hash = DigestUtils.sha1(pass)
 }
 
-trait Sha1Saphir extends Sha1 {
+class Sha1Saphir() extends Sha1 {
   // saphir digester is not thread safe
   import java.security.MessageDigest
   import fr.cryptohash.JCAProvider
@@ -70,7 +70,7 @@ trait Sha1Saphir extends Sha1 {
   def makehash(pass: Pass): Hash = md.digest(pass)
 }
 
-trait Sha1SaphirPooled extends Sha1 {
+class Sha1SaphirPooled() extends Sha1 {
   // saphir digester is not thread safe, so using pooling
   import java.security.MessageDigest
   import fr.cryptohash.JCAProvider
@@ -104,16 +104,16 @@ object Alphabet {
 }
 
 trait Progress {
-  protected def progressMade(alphabet: Alphabet, passwordSize: Int) {}
+  def progressMade(context:GoalContext)
 }
 
-trait StdoutProgress extends Progress with Utils {
+class StdoutProgress extends Progress with Utils {
   val checkStep = 1000000L
   private var count = 0L
   private var prevtime = 0L
   private var prevcount = 0L
 
-  override protected def progressMade(alphabet: Alphabet, passwordSize: Int) {
+  def progressMade(context:GoalContext) {
     synchronized {
       count += 1
       if (count % checkStep == 0L) {
@@ -127,7 +127,7 @@ trait StdoutProgress extends Progress with Utils {
             val justdonecount = count - prevcount
             prevtime = curtime
             prevcount = count
-            val remaintime = (alphabet.combs(passwordSize) - count) * duration / justdonecount / 1000 / 3600
+            val remaintime = (context.combs() - count) * duration / justdonecount / 1000 / 3600
             val remaindays = remaintime/24
             val rate = justdonecount * 1000L / duration
             println(s"$count total tested, +$justdonecount added in $duration ms - $rate/s - $remaintime hours remaining ($remaindays days)")
@@ -138,14 +138,48 @@ trait StdoutProgress extends Progress with Utils {
   }
 }
 
-trait PasswordGenerator {
-  val alphabet: Alphabet
-  def passwordGenerator(passlen: Int): Iterator[Pass] = {
-    var tmp = Array.fill(passlen)(0)
+
+class StdoutAtomicProgress() extends Progress with Utils {
+  import java.util.concurrent.atomic._
+  
+  val checkStep = 1000000L
+  private val counter = new AtomicLong(0)
+  private var prevtime = 0L
+  private var prevcount = 0L
+
+  def progressMade(context:GoalContext) {
+      val count = counter.addAndGet(1)
+      if (count % checkStep == 0L) synchronized {
+        if (prevtime == 0) {
+          prevtime = now
+          prevcount = count
+        } else {
+          val curtime = now
+          if (curtime - prevtime > 10000) { // at least every 10s
+            val duration = curtime - prevtime
+            val justdonecount = count - prevcount
+            prevtime = curtime
+            prevcount = count
+            val remaintime = (context.combs() - count) * duration / justdonecount / 1000 / 3600
+            val remaindays = remaintime/24
+            val rate = justdonecount * 1000L / duration
+            println(s"$count total tested, +$justdonecount added in $duration ms - $rate/s - $remaintime hours remaining ($remaindays days)")
+          }
+        }
+      }
+  }
+}
+
+
+
+
+class PasswordGenerator(context:GoalContext) {
+  def generator(): Iterator[Pass] = {
+    var tmp = Array.fill(context.passwordSize)(0)
     def inc(): Boolean = {
       def incworker(pos: Int): Boolean = {
-        if (pos == passlen) false else {
-          if (tmp(pos) < alphabet.size - 1) {
+        if (pos == context.passwordSize) false else {
+          if (tmp(pos) < context.alphabet.size - 1) {
             tmp(pos) = tmp(pos) + 1
             true
           } else {
@@ -160,7 +194,7 @@ trait PasswordGenerator {
       private var status: Boolean = true
       def hasNext: Boolean = status
       def next(): Pass = {
-        val newone = tmp.map(i => alphabet(i))
+        val newone = tmp.map(i => context.alphabet(i))
         //val newone = Array.ofDim[Byte](passlen)
         //for(i <- 0 until passlen) newone(i)=alphabet(tmp(i))
         status = inc()
@@ -168,18 +202,28 @@ trait PasswordGenerator {
       }
     }
   }
-
 }
 
-trait Brutalizer extends Progress {
+
+
+
+case class GoalContext(
+    passwordSize:Int,
+    alphabet:Alphabet
+    ) {
+  def combs()=alphabet.combs(passwordSize)
+}
+
+
+
+
+trait Brutalizer {
   val codec = "US-ASCII"
-  val alphabet: Alphabet
-  val passwordSize:Int
-  def makehash(password: Pass): Hash
-  def hashit(pass:Pass):Tuple2[Pass,Hash]
+  val context: GoalContext
+  val impls: Implementations
   
   def testhash(hash2test: Pass, refhash: Hash) = {
-    progressMade(alphabet, passwordSize)
+    impls.progress.progressMade(context)
     if (hash2test.size != refhash.size) false
     else {
       var i = hash2test.size - 1
@@ -189,16 +233,16 @@ trait Brutalizer extends Progress {
   }
 
   def testpassword(password2test: Pass, refhash: Hash):Boolean = {
-    val hash2test = makehash(password2test)
+    val hash2test = impls.sha1.makehash(password2test)
     testhash(hash2test,refhash)
   }
 }
 
-abstract class ClassicBrutalizer(val alphabet: Alphabet, val passwordSize: Int) extends Brutalizer {
+abstract class ClassicBrutalizer(val context:GoalContext, val impls:Implementations) extends Brutalizer {
   def brutalize(inhash: Hash): Option[String] = {
-    val curpass = Array.fill(passwordSize)(alphabet.head)
+    val curpass = Array.fill(context.passwordSize)(context.alphabet.head)
     def worker(pos: Int): Option[String] = {
-      if (pos == passwordSize) {
+      if (pos == context.passwordSize) {
         if (testpassword(curpass, inhash)) {
           val found = new String(curpass, codec)
           println(s"Found : $found")
@@ -206,7 +250,7 @@ abstract class ClassicBrutalizer(val alphabet: Alphabet, val passwordSize: Int) 
         } else None
       } else {
         var result: Option[String] = None
-        for { c <- alphabet.chars if !result.isDefined } {
+        for { c <- context.alphabet.chars if !result.isDefined } {
           curpass(pos) = c
           result = worker(pos + 1)
         }
@@ -217,22 +261,22 @@ abstract class ClassicBrutalizer(val alphabet: Alphabet, val passwordSize: Int) 
   }
 }
 
-abstract class ParallelBrutalizer(val alphabet: Alphabet, val passwordSize: Int) extends Brutalizer with PasswordGenerator {
+class ParallelBrutalizer(val context:GoalContext, val impls:Implementations) extends Brutalizer{
   import scala.concurrent._
   import java.util.concurrent._
   implicit val customExecutor = ExecutionContext.fromExecutorService(Executors.newFixedThreadPool(6))
 
   def brutalize(inhash: Hash): Option[String] = {
-    passwordGenerator(passwordSize)
+    impls.generator.generator()
       .grouped(100000)
-      .map(_.par.map(hashit).find{case (p, h) => testhash(h, inhash) }.map{case (p,h) => new String(p)} )
+      .map(_.par.map(impls.sha1.hashit).find{case (p, h) => testhash(h, inhash) }.map{case (p,h) => new String(p)} )
       .toStream
       .filter(_.isDefined)
       .head
   }
 }
 
-abstract class ParallelIteraBrutalizer(val alphabet: Alphabet, val passwordSize: Int) extends Brutalizer with PasswordGenerator {
+class ParallelIteraBrutalizer(val context:GoalContext, val impls:Implementations) extends Brutalizer {
   import com.timgroup.iterata.ParIterator.Implicits._
   import scala.concurrent._
   import java.util.concurrent._
@@ -240,9 +284,9 @@ abstract class ParallelIteraBrutalizer(val alphabet: Alphabet, val passwordSize:
   implicit val customExecutor = ExecutionContext.fromExecutorService(Executors.newFixedThreadPool(6))
 
   def brutalize(inhash: Hash): Option[String] = {
-    val result = passwordGenerator(passwordSize)
+    val result = impls.generator.generator()
       .par(100000)
-      .map(hashit)
+      .map(impls.sha1.hashit)
       .filter{case (p,h) => testhash(h, inhash)}
       .map{case (p, h) =>new String(p)}
     if (result.hasNext) Some(result.next) else None
@@ -251,7 +295,7 @@ abstract class ParallelIteraBrutalizer(val alphabet: Alphabet, val passwordSize:
 
 
 
-abstract class StreamedBrutalizer(val alphabet: Alphabet, val passwordSize: Int) extends Brutalizer with PasswordGenerator {
+class StreamedBrutalizer(val context:GoalContext, val impls:Implementations) extends Brutalizer {
   import scala.concurrent.ExecutionContext.Implicits.global
   import akka.actor.{ ActorSystem, Actor, Props }
   import akka.stream.{ActorMaterializer}
@@ -264,7 +308,7 @@ abstract class StreamedBrutalizer(val alphabet: Alphabet, val passwordSize: Int)
   implicit val materializer = ActorMaterializer()
 
   def brutalize(inhash: Hash): Option[String] = {
-    val passwords:Source[Pass,Unit] = Source.fromIterator(() =>passwordGenerator(passwordSize))
+    val passwords:Source[Pass,Unit] = Source.fromIterator(() =>impls.generator.generator())
     //val out = Sink.headOption[Option[String]]
     val out = Sink.foreach[Option[String]](println)
     
@@ -287,6 +331,13 @@ abstract class StreamedBrutalizer(val alphabet: Alphabet, val passwordSize: Int)
   }
 }
 
+case class Implementations(
+    sha1:Sha1,
+    generator:PasswordGenerator,
+    progress:Progress
+    )
+
+
 object Brute extends Utils {
 
   def main(args: Array[String]) {
@@ -295,19 +346,18 @@ object Brute extends Utils {
     val alphabet = Alphabet(('0' to '9') ++ ('a' to 'z') ++ ('A' to 'Z'))
     alphabet.info(passlen)
 
-    //val brutalizer = new ClassicBrutalizer(alphabet, passlen) with Sha1Native with StdoutProgress
-    //val brutalizer = new ClassicBrutalizer(alphabet, passlen) with Sha1Native with StdoutProgress
-    //val brutalizer = new ClassicBrutalizer(alphabet, passlen) with Sha1NativeThreadLocal with StdoutProgress
-    //val brutalizer = new ClassicBrutalizer(alphabet, passlen) with Sha1NativePooled with StdoutProgress
-    //val brutalizer = new ClassicBrutalizer(alphabet, passlen) with Sha1Apache with StdoutProgress
+    val context = GoalContext(passlen, alphabet)
     
-    val brutalizer = new ParallelBrutalizer(alphabet,passlen) with Sha1NativeThreadLocal with StdoutProgress
-    //val brutalizer = new ParallelIteraBrutalizer(alphabet,passlen) with Sha1NativeThreadLocal with StdoutProgress
+    val sha1 = new Sha1Nop()
+    val generator = new PasswordGenerator(context)
+    val progress = new StdoutAtomicProgress()
+
+    val impls = new Implementations(sha1=sha1, generator=generator, progress=progress) 
     
-    //val brutalizer = new StreamedBrutalizer(alphabet,passlen) with Sha1NativeThreadLocal with StdoutProgress
+    val brutalizer = new ParallelBrutalizer(context, impls)
 
     val testpassword="trucMuc1"
-    val inhash = brutalizer.makehash(testpassword.getBytes(brutalizer.codec))
+    val inhash = sha1.makehash(testpassword.getBytes(brutalizer.codec))
     println("bruteforcing sha1=" + toHex(inhash))
 
     brutalizer.brutalize(inhash)
