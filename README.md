@@ -17,6 +17,8 @@ are tested, as well as several ways to try using all available CPU.
   as we starts using parallel algorithms.
 - First parallel implementations didn't improve performances ! it was even worst, for 
   nop sha-1, 110 days for classic => 740 days for parallel
+  + The issue was linked to the password generator that was not fast enough, and was not 
+    used by the default classic implementation !
 
 ## Some interesting external links
 
