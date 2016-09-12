@@ -2,7 +2,7 @@ name := "bullyboy"
 
 version := "0.0.1"
 
-scalaVersion := "2.11.7"
+scalaVersion := "2.11.8"
 
 scalacOptions ++= Seq("-unchecked", "-deprecation" , "-feature", "-language:implicitConversions")
 
@@ -15,13 +15,13 @@ libraryDependencies ++= Seq(
    "de.tynne" % "saphir-hash-jca" % "3.0.1",
    "com.typesafe.akka" %% "akka-stream-experimental" % "2.0.2",
    "com.timgroup" %% "iterata" % "0.1.6",
-   "io.github.andrebeat" %% "scala-pool" % "0.3.0-SNAPSHOT"
+   "io.github.andrebeat" %% "scala-pool" % "0.3.0"
 )
 
 libraryDependencies += "org.scalatest" %% "scalatest" % "2.2.6" % "test"
 libraryDependencies += "junit" % "junit" % "4.12" % "test"
 
-resolvers += Resolver.sonatypeRepo("snapshots")
+//resolvers += Resolver.sonatypeRepo("snapshots")
 
 
 initialCommands in console := """
