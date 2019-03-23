@@ -16,13 +16,10 @@
 
 package bullyboy
 
-import org.junit.runner.RunWith
-import org.scalatest.FunSuite
-import org.scalatest.ShouldMatchers
-import org.scalatest.junit.JUnitRunner
 
-@RunWith(classOf[JUnitRunner])
-class BruteTest extends FunSuite with ShouldMatchers {
+import org.scalatest._
+
+class BruteTest extends FunSuite with Matchers {
   
   test("Simple test") {
     info("Test done")

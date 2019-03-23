@@ -16,7 +16,7 @@
 
 package bullyboy
 
-import scala.concurrent.ExecutionContextExecutor
+import scala.concurrent.{ExecutionContext, ExecutionContextExecutor}
 
 trait Descriptor {
   val name:String
@@ -165,12 +165,12 @@ class StdoutAtomicProgress() extends Progress with Utils {
   val desc = "Basic progress followup using JVM atomic operation"
   import java.util.concurrent.atomic._
 
-  val checkStep = 1000000L
+  final val checkStep = 10000000L
   private val counter = new AtomicLong(0)
   private var prevtime = 0L
   private var prevcount = 0L
 
-  def progressMade(context: GoalContext) {
+  final def progressMade(context: GoalContext) {
     val count = counter.addAndGet(1)
     if (count % checkStep == 0L) synchronized {
       if (prevtime == 0) {
@@ -338,7 +338,7 @@ class ParallelIteraBrutalizer(val context: GoalContext, val impls: Implementatio
     if (result.hasNext) Some(result.next) else None
   }
 }
-
+/*
 class StreamedBrutalizer(val context: GoalContext, val impls: Implementations) extends Brutalizer {
   val name = "Streamed Brutalizer"
   val desc = "Akka streamed based implementation"
@@ -376,6 +376,7 @@ class StreamedBrutalizer(val context: GoalContext, val impls: Implementations) e
     None
   }
 }
+*/
 
 case class Implementations(
   sha1: Sha1,
@@ -389,7 +390,7 @@ case class Implementations(
   
   
 object Implementations {
-  def defaultExecutor():ExecutionContextExecutor = {
+  def defaultExecutor():ExecutionContext = {
     scala.concurrent.ExecutionContext.Implicits.global
   }
   def fixedPoolExecutor():ExecutionContextExecutor = {
@@ -413,8 +414,10 @@ object Brute extends Utils {
 
     val context = GoalContext(passlen, alphabet)
 
-    //val sha1 = new Sha1Nop()
+//    val sha1 = new Sha1Nop()
     val sha1 = new Sha1NativeThreadLocal()
+//    val sha1 = new Sha1Apache()
+//    val sha1 = new Sha1NativePooled()
     val generator = new PasswordGenerator(context)
     val progress = new StdoutAtomicProgress()
     val executor = Implementations.fixedPoolExecutor()
