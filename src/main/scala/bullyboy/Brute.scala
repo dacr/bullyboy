@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 David Crosson
+ * Copyright 2019 David Crosson
  * 
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -416,6 +416,7 @@ object Brute extends Utils {
 
 //    val sha1 = new Sha1Nop()
     val sha1 = new Sha1NativeThreadLocal()
+//    val sha1 = new Sha1SaphirPooled()
 //    val sha1 = new Sha1Apache()
 //    val sha1 = new Sha1NativePooled()
     val generator = new PasswordGenerator(context)
